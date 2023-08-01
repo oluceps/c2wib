@@ -1,5 +1,6 @@
 import { Terminal } from "xterm";
 import { FitAddon } from 'xterm-addon-fit';
+import { libbpfWasmHeaderStr } from './libbpf-wasm-file.js';
 
 import { render, html } from "lit";
 
@@ -35,9 +36,60 @@ window.terminal = terminal;
 emception.onstdout = Comlink.proxy((str) => terminal.write(str + "\n"));
 emception.onstderr = Comlink.proxy((str) => terminal.write(str + "\n"));
 
+class FileStorage {
+  constructor() {
+    this.files = [];
+  }
+
+  addFile(file) {
+    this.files.push(file);
+  }
+
+  getFileNames() {
+    return this.files.map(file => file.name);
+  }
+
+  getFileContent(fileName) {
+    const file = this.files.find(file => file.name === fileName);
+    if (file) {
+      const reader = new FileReader();
+
+      return new Promise((resolve, reject) => {
+        reader.onload = function(event) {
+          resolve(event.target.result);
+        };
+        reader.onerror = function(error) {
+          reject(error);
+        };
+
+        reader.readAsText(file);
+      });
+    } else {
+      return Promise.reject(new Error("File not found."));
+    }
+  }
+
+  async writeToVirtualFS() {
+    const fileNames = this.getFileNames();
+    for (let i = 0; i < fileNames.length; i++) {
+      let perName = fileNames[i];
+      let perCtx = await this.getFileContent(perName);
+
+      await emception.fileSystem.writeFile(`/working/${perName}`, perCtx);
+    }
+  }
+
+  getRealName() {
+    const fileNames = this.getFileNames();
+    return fileNames[0].split(".")[0];
+  }
+}
+
+
 
 
 async function main() {
+  const fileStorage = new FileStorage();
   render(html`
         <div id="layout">
             <div id="header">
@@ -49,14 +101,37 @@ async function main() {
                     ${terminalContainer}
                 </div>
                 <div id="status"></div>
-  <input type="file" id="fileInput" multiple />
-  <button onclick="handleFileUpload()">Upload source (header) file</button>
-  <div id="fileList"></div>
+                <input type="file" id="fileInput" multiple />
+                <button id="uploadButton">Upload source (header) Files</button>
+                <div id="fileList"></div>
 
-                <button disabled id="download">Download Wasm</button>
+                <button id="downloadButton">Download Wasm</button>
+
             </div>
         </div>
     `, document.body);
+
+  document.getElementById("uploadButton").addEventListener("click", handleFileUpload);
+
+  const fileInput = document.getElementById("fileInput");
+  const fileList = document.getElementById("fileList");
+
+  function handleFileUpload() {
+    if (fileInput.files.length === 0) {
+      alert("select file to upload.");
+      return;
+    }
+
+    fileList.innerHTML = "";
+
+    for (let i = 0; i < fileInput.files.length; i++) {
+      const file = fileInput.files[i];
+      const listItem = document.createElement("div");
+      listItem.textContent = file.name;
+      fileList.appendChild(listItem);
+      fileStorage.addFile(file);
+    }
+  }
 
   const flagsStr = "-O2 -g -Wl,--allow-undefined -sERROR_ON_UNDEFINED_SYMBOLS=0";
 
@@ -91,9 +166,7 @@ async function main() {
 
 
   const compile = document.getElementById("compile");
-  const uploadFile = document.getElementById("upload");
-  const downloadWasm = document.getElementById("download")
-  const fileList = document.getElementById("fileList")
+
   compile.addEventListener("click", async () => {
     compile.disabled = true;
     compile.textContent = "Compiling";
@@ -101,15 +174,34 @@ async function main() {
     try {
       terminal.reset();
 
-      await emception.fileSystem.writeFile("/working/bootstrap.c", "test");
+      await emception.fileSystem.writeFile("/working/libbpf-wasm.h", atob(libbpfWasmHeaderStr));
 
-      const cmd = `emcc ${flagsStr} bootstrap.c -o bootstrap.wasm`;
+      await fileStorage.writeToVirtualFS();
+
+      const cmd = `emcc ${flagsStr} bootstrap.c -o main.wasm`;
       onprocessstart(`/emscripten/${cmd}`.split(/\s+/g));
       terminal.write(`$ ${cmd}\n\n`);
       const result = await emception.run(cmd);
       terminal.write("\n");
       if (result.returncode == 0) {
         terminal.write("Compilation finished");
+
+        const content = await emception.fileSystem.readFile("/working/main.wasm");
+        var fileName = fileStorage.getRealName();
+
+        const downloadButton = document.getElementById('downloadButton');
+
+        downloadButton.addEventListener('click', () => {
+          const blob = new Blob([content], { type: 'application/wasm' });
+          const url = URL.createObjectURL(blob);
+          const virtualLink = document.createElement('a');
+          virtualLink.href = url;
+          virtualLink.download = fileName; 
+          virtualLink.click();
+
+          URL.revokeObjectURL(url);
+        });
+
       } else {
         terminal.write(`Compilation failed`);
       }
@@ -119,7 +211,7 @@ async function main() {
     } finally {
       status.textContent = "Iddle";
       statusElements.splice(0, statusElements.length);
-      compile.textContent = "Compile!";
+      compile.textContent = "Compile";
       compile.disabled = false;
     }
   });
@@ -135,7 +227,7 @@ async function main() {
 
   status.textContent = "Iddle";
   compile.disabled = false;
-  compile.textContent = "Compile!";
+  compile.textContent = "Compile";
 }
 
 main();
