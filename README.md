@@ -2,7 +2,11 @@
 
 This project based on [emception](https://github.com/jprendes/emception/tree/master), [emscripten](https://emscripten.org) and [LLVM](https://llvm.org/).
 
-[demo](./demo.gif)
+
+
+https://github.com/oluceps/c2wib/assets/35628088/6402fe32-ba2b-4f67-8ae5-a0cb45703695
+
+
 
 # Demo
 
