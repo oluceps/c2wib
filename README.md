@@ -30,6 +30,21 @@ Chromium 115.0.5790.110
 $ ./build.sh
 $ pnpm build
 ```
+
+## build with docker
+```
+$  docker buildx build . -t ctwib_build
+$  docker run \
+    -it --rm \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v $(pwd):$(pwd) \
+    -v $(pwd)/emception/build/emsdk_cache:/emception/emsdk/upstream/emscripten/cache \
+    -u $(id -u):$(id -g) \
+    $(id -G | tr ' ' '\n' | xargs -I{} echo --group-add {}) \
+    ctwib_build:latest \
+    bash -c "pushd $(pwd)/emception && ./build.sh && popd && pnpm build"
+```
+
 # Serve
 ```console
 $ pnpm dev
